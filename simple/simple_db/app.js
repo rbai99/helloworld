@@ -1,8 +1,8 @@
-var express = require('express'),
-    http = require('http'),
-    path = require('path'),
-    mongoose = require('mongoose'),
-    hash = require('./pass').hash;
+var express = require('express');
+var  http = require('http');
+var  path = require('path');
+var  mongoose = require('mongoose');
+var  hash = require('./pass').hash;
 
 var app = express();
 var util = require('util');
@@ -20,15 +20,27 @@ var QuestionDao = require('./db/dao/questionDao');
 
 //mongoose model
 var User = UserDao.User;
+var Device = UserDao.Device;
 var Question =QuestionDao.Question;
 var Answer = QuestionDao.Answer;
 var gridFS;
+
+var default_device_token = 'AjSKTwRoW24uejC0lH06GDZNdfXutox5OKeky_jk2WLc';
+
+var push_server = {
+    username: 'apollo_lai@hotmail.com',
+    password: 'chebang2014',
+    appkey: '538f8b0f56240ba4ac087104',
+    app_master_secret: 'v5amsd1atrubwd7hhvfwntg5zlg0vcyl',
+    server: 'msg.umeng.com',
+    path: '/api/send'
+};
 
 /*
  Helper Functions
  */
 function authenticate(name, pass, fn) {
-    if (!module.parent) console.log('authenticating %s:%s', name, pass);
+    console.log('authenticating %s:%s', name, pass);
     User.findOne({username: name},function (err, user) {
             if (user) {
                 console.log("find user " + user);
@@ -45,14 +57,6 @@ function authenticate(name, pass, fn) {
         });
 }
 
-function requiredAuthentication(req, res, next) {
-    if (req.session.user) {
-        next();
-    } else {
-        req.session.error = 'Access denied!';
-        res.redirect('/login');
-    }
-}
 
 function userExist(req, res, next) {
     User.count({
@@ -72,14 +76,33 @@ function getVerifyCode(){
     return "123456";
 }
 
-var push_server = {
-    username: 'apollo_lai@hotmail.com',
-    password: 'chebang2014',
-    appkey: '538f8b0f56240ba4ac087104',
-    app_master_secret: 'v5amsd1atrubwd7hhvfwntg5zlg0vcyl',
-    server: 'msg.umeng.com',
-    path: '/api/send'
-};
+
+function array_merge(a1, a2){
+
+    for(var i =0 ; i < a2.length; i++){
+        var not_in = true;
+        for (var j=0; j < a1.length; j++){
+            if (a1[j] == a2[i]){
+                not_in = false;
+                break;
+            }
+        }
+        if (not_in){
+            a1.push(a2[i]);
+        }
+    }
+}
+
+function array_sub(a1, a2){
+    for(var i =0 ; i < a2.length; i++){
+        for (var j=0; j < a1.length; j++){
+            if (a1[j] == a2[i]){
+                a1.splice(j, 1);
+                break;
+            }
+        }
+    }
+}
 
 function send_notification(receivers, type, content){
 //    console.log("receiver %s type %s content %s", receivers, type, content);
@@ -116,14 +139,22 @@ function send_notification(receivers, type, content){
 
     receivers.forEach(function(item, index){
         console.log('send_notification for user %s', item);
-        User.findById(item, function(err, user){
-            if (user){
+        User.findById(item).populate('deviceList').exec(function(err, user_doc){
+            if (user_doc){
                 msg.timestamp = (new Date()).valueOf();
                 var md5 = crypto.createHash('md5');
                 md5.update(msg.appkey + push_server.app_master_secret + msg.timestamp);
                 msg.validation_token = md5.digest(encoding='hex');
-                //msg.device_tokens = user.device_token;
-                msg.device_tokens = 'AjSKTwRoW24uejC0lH06GDZNdfXutox5OKeky_jk2WLc';
+
+                if (user_doc.deviceList && user_doc.deviceList.length > 0){
+                    console.log("user: " + JSON.stringify(user_doc));
+                    if (user_doc.deviceList[0].deviceToken)
+                        msg.device_tokens = user_doc.deviceList[0].deviceToken;
+                    else
+                        msg.device_tokens = default_device_token;
+                }else {
+                    msg.device_tokens = default_device_token;
+                }
                 console.log("send_notification: ts %s dt %s md5 %s", msg.timestamp, msg.device_tokens, msg.validation_token);
 
                 //send push request...
@@ -165,6 +196,201 @@ function send_notification(receivers, type, content){
             }
         });
     });
+}
+
+function send_empty_process_page(res){
+    response = "<html>\n"
+    response += "<head>\n"
+    response += "<script type='text/javascript' src='js/main.js'></script>\n"
+    response += "</head>\n";
+    response += "<body>\n";
+    response += "Welcome " + req.session.user.username + "   <a href='/logout'>Logout</a>\n";
+    response += "</body>\n";
+    response += "</html>";
+    res.send(response);
+}
+
+function send_process_page(res, req, questions){
+    var username = "";
+    response = "<html>\n"
+    response += "<head>\n"
+    response += "<script type='text/javascript' src='js/main.js'></script>\n"
+    response += "</head>\n";
+    response += "<body>\n";
+    response += "<p>Welcome " + req.session.user.username + "   <a href='/logout'>Logout</a></p>\n";
+    response += "<p>There are " + questions.length + " questions</p>\n";
+    response += "<table border='1'>\n";
+    response += "<tr><th>#</th><th>Date</th><th>ID</th><th>Request</th><th>Content</th><th>Specialists</th><th>Answers</th><th>Status</th>";
+    for(var i = 0; i < questions.length; i++){
+        response += "<tr>\n";
+        response += "<td><a href=/question_web?id="+questions[i]._id +">" + i + "</a></td>";
+        response += "<td>" + questions[i].timestamp + "</td>";
+        response += "<td>" + questions[i]._id + "</td>";
+
+        if (questions[i].requester){
+            username = questions[i].requester.username;
+        }else{
+            username = "";
+        }
+
+        response += "<td>" + username + "</td>";
+        response += "<td>" + questions[i].content + "</td>";
+
+        response += "<td>";
+        if (questions[i].specialists) {
+            for (var j = 0; j < questions[i].specialists.length; j++) {
+                response += questions[i].specialists[j].username + "<br />";
+            }
+        }
+        var answer_count = 0;
+        if (questions[i].answers)
+            answer_count = questions[i].answers.length;
+
+        response += "</td>";
+        response += "<td>" + answer_count + "</td>";
+        response += "<td>" + questions[i].status + "</td>";
+        response += "</tr>\n";
+    }
+    response += "</table>\n";
+    response += "</body>\n";
+    response += "</html>";
+    res.send(response);
+}
+
+function send_question_page(req, res, question, specialists_all){
+    response = "<html>\n"
+    response += "<head>\n"
+    response += "<script type='text/javascript' src='js/main.js'></script>\n"
+    response += "</head>\n";
+    response += "<body>\n";
+
+    response += "<form id='update_question_form' method='POST' action='/update_question_web'>";
+    response += "<p>Date: " + question.timestamp + "</p>\n";
+
+    if (question.requester) {
+        response += "<p>Requester: <a href='/user?id=" + question.requester._id + "'>" + question.requester.username + "</a></p>\n";
+    }else{
+        response += "<p>Requester not exists</a></p>\n";
+    }
+
+    response += "<p>Original content:<br />" + question.content + "</p>\n";
+
+    response += "Audios:<br />\n";
+    if (question.files) {
+        for(var i=0; i < question.files.length; i++) {
+            //response += "[" + i + "] " +  question.files[i]._id + "\n";
+            var audio_src = "/get_file?id=" + question.files[i]._id;
+            response += "<audio controls='controls'><source src='" + audio_src + "' type='audio/wav' /></audio><br /><br />\n"
+        }
+    }
+
+    var content2_str = "";
+    if (question.content2){
+        content2_str = question.content2;
+    }
+    console.log("content2: " + content2_str);
+    response += "<p>Content after process<br />\n<textarea rows='12' cols='70' name='content2'>" + content2_str +"</textarea>></p>\n";
+
+    response += "Sepecialists<br />\n";
+    response += "<select name='specialists' size='15' id='specialists' style='min-width:300px' multiple='multiple' ondblclick=\"rm_spec()\">\n";
+    if (question.specialists) {
+        for (var k = 0; k < question.specialists.length; k++){
+            response += "<option value='" + question.specialists[k]._id + "'>" + question.specialists[k].username + "</option>\n";
+        }
+    }
+    response += "<select>\n";
+
+    response += "<select name='specialists_all' size='15' id='specialists_all' style='min-width:300px' multiple='multiple' ondblclick=\"add_spec()\">\n";
+    if (specialists_all) {
+        for (var m = 0; m < specialists_all.length; m++) {
+            //response += "<option value='" + specialists_all[m]._id + "' ondblclick=\"add_spec()\">" + specialists_all[m].username + "</option>\n";
+            response += "<option value='" + specialists_all[m]._id + "'>" + specialists_all[m].username + "</option>\n";
+        }
+    }
+    response += "<select><br />\n";
+
+    response += "Answers:<br />\n";
+    if (question.answers){
+        for(var j=0; j < question.answers.length; j++){
+            var href_str = '/get_answer_web?id=' + question.answers[j]._id + '&question_id=' + question._id;
+            response += "<a href='" + href_str + "'>[" + j + "]  " + question.answers[j]._id + " visble = " + question.answers[j].visible + "</a><br />\n";
+        }
+    }
+
+    response += "<br />Status\n";
+    response += "<select name='status' value='"+ question.status + "'>\n";
+
+    var sel_str = ["", "", "", ""];
+
+    if (question.status == 'new'){
+        sel_str[0] = 'selected="selected"';
+    }else if (question.status == 'open'){
+        sel_str[1] = 'selected="selected"';
+    }else if (question.status == 'close'){
+        sel_str[2] = 'selected="selected"';
+    }else if (question.status == 'invalid'){
+        sel_str[3] = 'selected="selected"';
+    }
+
+    response += "<option value='new' " + sel_str[0] +">New</option>\n";
+    response += "<option value='open' " + sel_str[1] +">Open</option>\n";
+    response += "<option value='close' " + sel_str[2] +">Close</option>\n";
+    response += "<option value='invalid " + sel_str[3] +"'>Invalid</option>\n";
+    response += "</select><br /><br />\n";
+
+    response += "<input type='checkbox' name='delete' value='1'/>Delete<br /><br />\n";
+    response += "<input type='submit' id='sb' value='submit' onclick=\"submit_check()\"/>\n";
+
+    response += "<input type='hidden' id='specialist_hide' name='specialist_hide'/>";
+    response += "<input type='hidden' id='question_hide' name='question_id' value='" + question._id + "'/>";
+
+    response += "</form>\n";
+
+    response += "</body>\n";
+    response += "</body>\n";
+    response += "</html>";
+    res.send(response);
+}
+
+
+function send_answer_page(req,res, answer, question_id){
+    response = "<html>\n"
+    response += "<head>\n"
+    response += "<script type='text/javascript' src='js/main.js'></script>\n"
+    response += "</head>\n";
+    response += "<body>\n";
+
+    response += "<form id='update_answer_form' method='POST' action='/update_answer_web'>";
+    response += "<p>Date: " + answer.timestamp + "</p>\n";
+    response += "<p>Requester: <a href='/user?id="+ answer.answer_user_id._id + "'>" + answer.answer_user_id.username + "</a></p>\n";
+    response += "<p>Original content:<br />" + answer.content + "</p>\n";
+
+    response += "Audios:<br />\n";
+    if (answer.files) {
+        for(var i=0; i < answer.files.length; i++) {
+            var audio_src = "/get_file?id=" + answer.files[i]._id;
+            response += "<audio controls='controls'><source src='" + audio_src + "' type='audio/wav' /></audio><br /><br />\n"
+        }
+    }
+
+    var content2_str = "";
+    if (answer.content2){
+        content2_str = answer.content2;
+    }
+    console.log("content2: " + content2_str);
+    response += "<p>Content after process<br />\n<textarea rows='12' cols='70' name='content2'>" + content2_str +"</textarea>></p>\n";
+
+    response += "<input type='checkbox' name='delete' value='1'/>Delete<br /><br />\n";
+    response += "<input type='hidden' id='answer_id_hide' name='answer_id' value='" + answer._id + "'/>";
+    response += "<input type='hidden' id='question_id_hide' name='question_id' value='" + question_id + "'/>";
+    response += "<input type='submit' id='sb' value='submit'/>\n";
+
+    response += "</form>\n";
+
+    response += "</body>\n";
+    response += "</body>\n";
+    response += "</html>";
+    res.send(response);
 
 }
 
@@ -226,56 +452,7 @@ function main() {
         }
     });
 
-    function send_empty_process_page(res){
-        response = "<html>\n"
-        response += "<head>\n"
-        response += "<script type='text/javascript' src='js/main.js'></script>\n"
-        response += "</head>\n";
-        response += "<body>\n";
-        response += "Welcome " + req.session.user.username + "\n";
-        response += "</body>\n";
-        response += "</html>";
-        res.send(response);
-    }
 
-    function send_process_page(res, req, questions){
-        response = "<html>\n"
-        response += "<head>\n"
-        response += "<script type='text/javascript' src='js/main.js'></script>\n"
-        response += "</head>\n";
-        response += "<body>\n";
-        response += "<p>Welcome " + req.session.user.username + "</p>\n";
-        response += "<p>There are " + questions.length + " questions</p>\n";
-        response += "<table border='1'>\n";
-        response += "<tr><th>#</th><th>Date</th><th>ID</th><th>Request</th><th>Content</th><th>Specialists</th><th>Answers</th><th>Status</th>";
-        for(var i = 0; i < questions.length; i++){
-            response += "<tr>\n";
-            response += "<td><a href=/question_web?id="+questions[i]._id +">" + i + "</a></td>";
-            response += "<td>" + questions[i].timestamp + "</td>";
-            response += "<td>" + questions[i]._id + "</td>";
-            response += "<td>" + questions[i].requester.username + "</td>";
-            response += "<td>" + questions[i].content + "</td>";
-
-            response += "<td>";
-            if (questions[i].specialists) {
-                for (var j = 0; j < questions[i].specialists.length; j++) {
-                    response += questions[i].specialists[j].username + "<br />";
-                }
-            }
-            var answer_count = 0;
-            if (questions[i].answers)
-                answer_count = questions[i].answers.length;
-
-            response += "</td>";
-            response += "<td>" + answer_count + "</td>";
-            response += "<td>" + questions[i].status + "</td>";
-            response += "</tr>\n";
-        }
-        response += "</table>\n";
-        response += "</body>\n";
-        response += "</html>";
-        res.send(response);
-    }
 
     app.get("/", function (req, res) {
         //console.log(util.inspect(req));
@@ -300,94 +477,6 @@ function main() {
         }
     });
 
-    function send_question_page(req, res, question, specialists_all){
-        response = "<html>\n"
-        response += "<head>\n"
-        response += "<script type='text/javascript' src='js/main.js'></script>\n"
-        response += "</head>\n";
-        response += "<body>\n";
-
-        response += "<form id='update_question_form' method='POST' action='/update_question_web'>";
-        response += "<p>Date: " + question.timestamp + "</p>\n";
-        response += "<p>Requester: <a href='/user?id="+ question.requester._id + "'>" + question.requester.username + "</a></p>\n";
-        response += "<p>Original content:<br />" + question.content + "</p>\n";
-
-        response += "Audios:<br />\n";
-        if (question.files) {
-            for(var i=0; i < question.files.length; i++) {
-                //response += "[" + i + "] " +  question.files[i]._id + "\n";
-                var audio_src = "/get_file?id=" + question.files[i]._id;
-                response += "<audio controls='controls'><source src='" + audio_src + "' type='audio/wav' /></audio><br /><br />\n"
-            }
-        }
-
-        var content2_str = "";
-        if (question.content2){
-            content2_str = question.content2;
-        }
-        console.log("content2: " + content2_str);
-        response += "<p>Content after process<br />\n<textarea rows='12' cols='70' name='content2'>" + content2_str +"</textarea>></p>\n";
-
-        response += "Sepecialists<br />\n";
-        response += "<select name='specialists' size='15' id='specialists' style='min-width:300px' multiple='multiple' ondblclick=\"rm_spec()\">\n";
-        if (question.specialists) {
-            for (var k = 0; k < question.specialists.length; k++){
-                response += "<option value='" + question.specialists[k]._id + "'>" + question.specialists[k].username + "</option>\n";
-            }
-        }
-        response += "<select>\n";
-
-        response += "<select name='specialists_all' size='15' id='specialists_all' style='min-width:300px' multiple='multiple' ondblclick=\"add_spec()\">\n";
-        if (specialists_all) {
-            for (var m = 0; m < specialists_all.length; m++) {
-                //response += "<option value='" + specialists_all[m]._id + "' ondblclick=\"add_spec()\">" + specialists_all[m].username + "</option>\n";
-                response += "<option value='" + specialists_all[m]._id + "'>" + specialists_all[m].username + "</option>\n";
-            }
-        }
-        response += "<select><br />\n";
-
-        response += "Answers:<br />\n";
-        if (question.answers){
-            for(var j=0; j < question.answers.length; j++){
-                var href_str = '/get_answer_web?id=' + question.answers[j]._id + '&question_id=' + question._id;
-                response += "<a href='" + href_str + "'>[" + j + "]  " + question.answers[j]._id + " visble = " + question.answers[j].visible + "</a><br />\n";
-            }
-        }
-
-        response += "<br />Status\n";
-        response += "<select name='status' value='"+ question.status + "'>\n";
-
-        var sel_str = ["", "", "", ""];
-
-        if (question.status == 'new'){
-            sel_str[0] = 'selected="selected"';
-        }else if (question.status == 'open'){
-            sel_str[1] = 'selected="selected"';
-        }else if (question.status == 'close'){
-            sel_str[2] = 'selected="selected"';
-        }else if (question.status == 'invalid'){
-            sel_str[3] = 'selected="selected"';
-        }
-
-        response += "<option value='new' " + sel_str[0] +">New</option>\n";
-        response += "<option value='open' " + sel_str[1] +">Open</option>\n";
-        response += "<option value='close' " + sel_str[2] +">Close</option>\n";
-        response += "<option value='invalid " + sel_str[3] +"'>Invalid</option>\n";
-        response += "</select><br /><br />\n";
-
-        response += "<input type='checkbox' name='delete' value='1'/>Delete<br /><br />\n";
-        response += "<input type='submit' id='sb' value='submit' onclick=\"submit_check()\"/>\n";
-
-        response += "<input type='hidden' id='specialist_hide' name='specialist_hide'/>";
-        response += "<input type='hidden' id='question_hide' name='question_id' value='" + question._id + "'/>";
-
-        response += "</form>\n";
-
-        response += "</body>\n";
-        response += "</body>\n";
-        response += "</html>";
-        res.send(response);
-    }
 
     app.get("/question_web", function (req, res) {
         if (req.session.user) {
@@ -429,15 +518,42 @@ function main() {
     app.post("/signup", userExist, function (req, res) {
         //console.log(util.inspect(req));
 
-        var password = req.body.password;
-        var username = req.body.username;
-        var verify_code = req.body.verify_code;
-        console.log("signup %s %s %s", username, password, verify_code);
+        console.log("signup...");
+        var check_ok = true;
+        var err_msg = "";
+        if (!req.body.username) {
+            check_ok = false;
+            err_msg += 'no username';
+        }
+        if (!req.body.username) {
+            check_ok = false;
+            err_msg += 'no password';
+        }
+        if (!req.body.verify_code) {
+            check_ok = false;
+            err_msg += 'no verify code';
+        }
+        if (!req.body.device_token) {
+            check_ok = false;
+            err_msg += 'no device token';
+        }
+        if (!req.body.device_type) {
+            check_ok = false;
+            err_msg += 'no device type';
+        }
+        if (check_ok == false) {
+            console.log('signup failed: ' + err_msg);
+            res.contentType('json');
+            res.json({ ret: -1, msg:err_msg});
+            return;
+        }
+
+        console.log("signup %s %s %s", req.body.username, req.body.password, req.body.verify_code);
 
         var pass = 0;
         for (i = 0; i < user_code_pair_array.length; i++) {
-            if (user_code_pair_array[i].username == username) {
-                if (user_code_pair_array[i].verify_code == verify_code) {
+            if (user_code_pair_array[i].username == req.body.username) {
+                if (user_code_pair_array[i].verify_code == req.body.verify_code) {
                     user_code_pair_array.splice(i, 1);
                     console.log("signup: verify pass!");
                     pass = 1;
@@ -446,35 +562,46 @@ function main() {
             }
         }
 
-        console.log(pass);
-
         if (pass == 0) {
             console.log("signup faild, wrong verify code %s!", verify_code);
             res.contentType('json');
-            res.json({ ret: -1});
-        } else {
-            hash(password, function (err, salt, hash) {
-                if (err) throw err;
-                var user = new User({
-                    username: username,
-                    salt: salt,
-                    hash: hash,
-                }).save(function (err, newUser) {
-                        if (err) throw err;
-                        authenticate(newUser.username, password, function (err, user) {
-                            if (user) {
-                                req.session.regenerate(function () {
-                                    req.session.user = user;
-                                    req.session.success = 'Authenticated as ' + user.username + ' click to <a href="/logout">logout</a>. ' + ' You may now access <a href="/restricted">/restricted</a>.';
-                                    res.contentType('json');
-                                    res.json({ ret: 0});
-                                    //res.redirect('/');
-                                });
-                            }
-                        });
-                    });
-            });
+            res.json({ ret: -1, msg:'wrong verify code'});
+            return;
         }
+
+        hash(req.body.password, function (err, salt, hash) {
+            if (err) throw err;
+
+            var new_user = {
+                username: req.body.username,
+                salt: salt,
+                hash: hash
+            };
+            var user = new User(new_user);
+
+            var new_device = {
+                owner: user._id,
+                deviceType: req.body.device_type,
+                deviceToken: req.body.device_token
+            };
+            var device = new Device(new_device);
+            console.log("signup: new user id %s device id %s", user._id, device._id);
+
+            user.deviceList.push(device._id);
+            user.save(function (err, user_doc) {
+                    if (err) throw err;
+                    if (user_doc) {
+                        device.save(function (err, device_doc){
+                            req.session.regenerate(function () {
+                                req.session.user = user_doc;
+                                req.session.success = '';
+                                res.contentType('json');
+                                res.json({ ret: 0});
+                            });
+                        });
+                    }
+                });
+        });
     });
 
     app.get("/login", function (req, res) {
@@ -490,6 +617,10 @@ function main() {
                 req.session.regenerate(function () {
                     req.session.user = user;
                     req.session.success = 'Authenticated as ' + user.username + ' click to <a href="/logout">logout</a>. ' + ' You may now access <a href="/restricted">/restricted</a>.';
+                    user.lastLoginDate = Date();
+                    user.save(function(err, user_doc){
+                        console.log('user login date updated!');
+                    })
                     res.contentType('json');
                     res.json({ ret: 0, user_id: req.session.user._id});
                 });
@@ -509,6 +640,10 @@ function main() {
                 req.session.regenerate(function () {
                     req.session.user = user;
                     req.session.success = 'Authenticated as ' + user.username + ' click to <a href="/logout">logout</a>. ' + ' You may now access <a href="/restricted">/restricted</a>.';
+                    user.lastLoginDate = Date();
+                    user.save(function(err, user_doc){
+                        console.log('user login date updated!');
+                    })
                     res.redirect('/');
                 });
             } else {
@@ -529,13 +664,6 @@ function main() {
         req.session.destroy(function () {
             res.redirect('/');
         });
-    });
-
-    app.get('/profile', requiredAuthentication, function (req, res) {
-
-        //console.log(util.inspect(req));
-
-        res.send('Profile page of ' + req.session.user.username + '<br>' + ' click to <a href="/logout">logout</a>');
     });
 
     app.get('/upload', function (req, res) {
@@ -588,15 +716,6 @@ function main() {
         res.header('Content-Disposition', 'attachment; filename=' + req.query.file);
 
         file.pipe(res);
-    });
-
-    app.get('/json', function (req, res) {
-        console.log(req.body);
-        console.log(req.session);
-
-        res.contentType('json');
-        res.send(JSON.stringify({ status: "success" }));
-        res.end();
     });
 
     app.post('/get_question', function(req,res){
@@ -761,9 +880,7 @@ function main() {
                         doc.content2 = req.body.content2;
                         if (req.body.specialist_hide.length > 0) {
                             var specialists_array = req.body.specialist_hide.split(',');
-                            for (var i = 0; i < specialists_array.length; i++) {
-                                doc.specialists.push(specialists_array[i]);
-                            }
+                            array_merge(doc.specialists, specialists_array);
                             send_notification(specialists_array, '0', 'new question ' + req.body.question_id);
                         }
                         doc.update_timestamp = Date();
@@ -944,119 +1061,85 @@ function main() {
         }
     });
 
-    function send_answer_page(req,res, answer, question_id){
-        response = "<html>\n"
-        response += "<head>\n"
-        response += "<script type='text/javascript' src='js/main.js'></script>\n"
-        response += "</head>\n";
-        response += "<body>\n";
-
-        response += "<form id='update_answer_form' method='POST' action='/update_answer_web'>";
-        response += "<p>Date: " + answer.timestamp + "</p>\n";
-        response += "<p>Requester: <a href='/user?id="+ answer.answer_user_id._id + "'>" + answer.answer_user_id.username + "</a></p>\n";
-        response += "<p>Original content:<br />" + answer.content + "</p>\n";
-
-        response += "Audios:<br />\n";
-        if (answer.files) {
-            for(var i=0; i < answer.files.length; i++) {
-                var audio_src = "/get_file?id=" + answer.files[i]._id;
-                response += "<audio controls='controls'><source src='" + audio_src + "' type='audio/wav' /></audio><br /><br />\n"
-            }
-        }
-
-        var content2_str = "";
-        if (answer.content2){
-            content2_str = answer.content2;
-        }
-        console.log("content2: " + content2_str);
-        response += "<p>Content after process<br />\n<textarea rows='12' cols='70' name='content2'>" + content2_str +"</textarea>></p>\n";
-
-        response += "<input type='checkbox' name='delete' value='1'/>Delete<br /><br />\n";
-        response += "<input type='hidden' id='answer_id_hide' name='answer_id' value='" + answer._id + "'/>";
-        response += "<input type='hidden' id='question_id_hide' name='question_id' value='" + question_id + "'/>";
-        response += "<input type='submit' id='sb' value='submit'/>\n";
-
-        response += "</form>\n";
-
-        response += "</body>\n";
-        response += "</body>\n";
-        response += "</html>";
-        res.send(response);
-
-    }
 
     app.get('/get_answer_web', function(req,res){
-        if (req.session.user) {
-            if (req.query && req.query.id){
-                Answer.findById(req.query.id).populate('answer_user_id').populate('files').exec(function(err, doc){
-                    if (err ){
-                        res.send('no such answer', 404);
-                    }else{
-                        if (doc){
-                            send_answer_page(req, res, doc, req.query.question_id);
-                        }else{
-                            res.send('no such answer', 404);
-                        }
-                    }
-                });
-            }else{
-                res.send('no such answer', 404);
-            }
-        }else{
+
+        if (!req.session.user) {
+            console.log('user not login');
             res.redirect('/login');
+            return;
+        }
+
+        if (req.query && req.query.id){
+            Answer.findById(req.query.id).populate('answer_user_id').populate('files').exec(function(err, doc){
+                if (err ){
+                    res.send('no such answer', 404);
+                }else{
+                    if (doc){
+                        send_answer_page(req, res, doc, req.query.question_id);
+                    }else{
+                        res.send('no such answer', 404);
+                    }
+                }
+            });
+        }else{
+            res.send('no such answer', 404);
         }
     });
 
     app.post('/update_answer_web', function(req,res){
         console.log(JSON.stringify(req.body));
-        if (req.session.user) {
-            if (req.body.answer_id) {
-                if (req.body.delete) {
-                    Answer.findById(req.body.answer_id, function(err, doc){
-                        if (doc) {
-                            doc.remove(function (err, removed_doc) {
-                                Question.findById(req.body.question_id, function(err, question_doc){
-                                    if (question_doc){
 
-                                        for (var i = 0; i < question_doc.answers.length; i++) {
-                                            if (question_doc.answers[i] == req.body.answer_id) {
-                                                question_doc.answers.splice(i, 1);
-                                                break;
-                                            }
-                                        }
-
-                                        question_doc.save(function (err, saved_question){
-                                            res.redirect('/question_web?id=' + req.body.question_id);
-                                        });
-
-                                    }else{
-                                        res.redirect('/question_web?id=' + req.body.question_id);
-                                    }
-                                });
-                            });
-                        }else{
-                            res.send('can not find answer', 404);
-                        }
-                    });
-                } else {
-                    Answer.findById(req.body.answer_id, function (err, doc) {
-                        if (doc) {
-                            doc.content2 = req.body.content2;
-                            doc.visible = 'true';
-                            doc.save(function (err) {
-                                res.redirect('/question_web?id=' + req.body.question_id);
-                            });
-                        } else {
-                            res.send('can not find answer', 404);
-                        }
-                    });
-                }
-        }else{
-            res.send('No answer id', 404);
-        }
-    }else{
+        if (!req.session.user) {
             console.log('user not login');
             res.redirect('/login');
+            return;
+        }
+
+        if (req.body.answer_id) {
+            res.send('No answer ID', 404);
+            return;
+        }
+
+        if (req.body.delete) {
+            Answer.findById(req.body.answer_id, function(err, doc){
+                if (doc) {
+                    doc.remove(function (err, removed_doc) {
+                        Question.findById(req.body.question_id, function(err, question_doc){
+                            if (question_doc){
+
+                                for (var i = 0; i < question_doc.answers.length; i++) {
+                                    if (question_doc.answers[i] == req.body.answer_id) {
+                                        question_doc.answers.splice(i, 1);
+                                        break;
+                                    }
+                                }
+
+                                question_doc.save(function (err, saved_question){
+                                    res.redirect('/question_web?id=' + req.body.question_id);
+                                });
+
+                            }else{
+                                res.redirect('/question_web?id=' + req.body.question_id);
+                            }
+                        });
+                    });
+                }else{
+                    res.send('can not find answer', 404);
+                }
+            });
+        } else {
+            Answer.findById(req.body.answer_id, function (err, doc) {
+                if (doc) {
+                    doc.content2 = req.body.content2;
+                    doc.visible = 'true';
+                    doc.save(function (err) {
+                        res.redirect('/question_web?id=' + req.body.question_id);
+                    });
+                } else {
+                    res.send('can not find answer', 404);
+                }
+            });
         }
     });
 
