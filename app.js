@@ -8,7 +8,7 @@ var app = express();
 var util = require('util');
 var fs = require('fs');
 var user_code_pair_array = [];
-
+var crypto = require('crypto');
 
 //mongoose...
 var async = require('async');
@@ -70,6 +70,101 @@ function userExist(req, res, next) {
 
 function getVerifyCode(){
     return "123456";
+}
+
+var push_server = {
+    username: 'apollo_lai@hotmail.com',
+    password: 'chebang2014',
+    appkey: '538f8b0f56240ba4ac087104',
+    app_master_secret: 'v5amsd1atrubwd7hhvfwntg5zlg0vcyl',
+    server: 'msg.umeng.com',
+    path: '/api/send'
+};
+
+function send_notification(receivers, type, content){
+//    console.log("receiver %s type %s content %s", receivers, type, content);
+    var msg = {
+        appkey: push_server.appkey,          // 必填 应用唯一标识
+        timestamp:"",       // 必填 时间戳，10位或者13位均可。
+        validation_token:"",// 必填 验证码，validation_token为appkey, app_master_secret与timestamp的md5码, 示例代码参照附录G。注意: appkey,app_master_secret均需要转化为小写。
+        type:"unicast",            // 必填 消息发送类型,其值为unicast,broadcast,groupcast,customizedcast或者filecast.
+                                //      unicast-单播,
+                                //      filecast-文件播(多个device_token可以通过文件形式批量发送）
+                                //      broadcast-广播,
+                                //      groupcast-组播(按照filter条件筛选特定用户群, 具体请参照filter参数)
+                                //      customizedcast(通过开发者定义的alias和友盟的device_tokens进行映射,
+                                //        可以传入单个alias, 也可以传入文件id。具体请参照alias和file_id参数)
+        device_tokens:"",   // 可选 设备唯一表示
+                                //      当type=unicast时,必填, 表示指定的单个设备
+                                //      当type=broadcast,groupcast,filecast或者customizedcast时, 无需填写此参数。
+        payload:{              // 必填 消息内容(Android最大为1024B, iOS为256B), 包含参数说明如下(JSON格式):
+            display_type:"notification",  // 必填 消息类型，值为notification或者message, notification-通知, message-消息.
+            body:{               // 必填 消息体。display_type=message时,body的内容只需填写custom字段。display_type=notification时, body可以包含如下参数:
+                ticker:type,    // 必填 通知栏提示文字
+                title:"chebang",     // 必填 通知标题
+                text:content,      // 必填 通知文字描述
+                after_open: "go_app"  // 必填 值为"go_app", "go_url", "go_activity", "go_custom"
+                                     //      "go_app": 打开应用
+                                    //      "go_url": 跳转到URL
+                                    //      "go_activity": 打开特定的activity
+                                    //      "go_custom": 用户自定义内容。
+            }
+        },
+        production_mode:"true" // 可选 正式\测试模式。 默认为"true"。测试模式下，只会将消息发给测试设备, 测试设备需要到web上添加。测试模式对单播不生效。
+    }
+
+
+    receivers.forEach(function(item, index){
+        console.log('send_notification for user %s', item);
+        User.findById(item, function(err, user){
+            if (user){
+                msg.timestamp = (new Date()).valueOf();
+                var md5 = crypto.createHash('md5');
+                md5.update(msg.appkey + push_server.app_master_secret + msg.timestamp);
+                msg.validation_token = md5.digest(encoding='hex');
+                msg.device_tokens = user.device_token;
+                console.log("send_notification: ts %s dt %s md5 %s", msg.timestamp, msg.device_tokens, msg.validation_token);
+
+                //send push request...
+                var req_json_str = JSON.stringify(msg);
+                var headers = {
+                    'Content-Type': 'application/json',
+                    'Content-Length': req_json_str.length,
+                };
+
+                var options = {
+                    host: push_server.server,
+                    port: 80,
+                    path: push_server.path,
+                    method: 'POST',
+                    headers: headers
+                };
+
+                var req = http.request(options, function (res) {
+                    res.setEncoding('utf8');
+                    var data = "";
+
+                    res.on('data', function (chunk) {
+                        data += chunk;
+                    });
+
+                    res.on('end',function(){
+                        console.log("get resp from push server:\n " + data);
+                        var ret_json = JSON.parse(data);
+                    });
+                });
+
+                req.on('error', function(e) {
+                    console.log('problem with request: ' + e.message);
+                });
+
+                req.write(req_json_str);
+                req.end();
+
+            }
+        });
+    });
+
 }
 
 /*
@@ -163,7 +258,7 @@ function main() {
             response += "<td>";
             if (questions[i].specialists) {
                 for (var j = 0; j < questions[i].specialists.length; j++) {
-                    response += questions[i].specialists.username;
+                    response += questions[i].specialists[j].username + "<br />";
                 }
             }
             var answer_count = 0;
@@ -184,7 +279,7 @@ function main() {
     app.get("/", function (req, res) {
         //console.log(util.inspect(req));
         if (req.session.user) {
-            Question.find().populate('requester').populate('specialists').populate('answers').sort('-timestamp').exec(function(err, docs){
+            Question.find().populate('requester').populate('specialists').populate('answers').sort('-update_timestamp').exec(function(err, docs){
                 if (err){
                     send_empty_process_page(res);
                 }else {
@@ -219,7 +314,9 @@ function main() {
         response += "Audios:<br />\n";
         if (question.files) {
             for(var i=0; i < question.files.length; i++) {
-                response += "[" + i + "] " +  question.files[i]._id + "<input type='button' value='play'><br />\n";
+                //response += "[" + i + "] " +  question.files[i]._id + "\n";
+                var audio_src = "/get_file?id=" + question.files[i]._id;
+                response += "<audio controls='controls'><source src='" + audio_src + "' type='audio/wav' /></audio><br /><br />\n"
             }
         }
 
@@ -227,10 +324,11 @@ function main() {
         if (question.content2){
             content2_str = question.content2;
         }
-        response += "<p>Content after process<br /><textarea rows='12' cols='70' name='cotent2'>" + content2_str +"</textarea>></p>\n";
+        console.log("content2: " + content2_str);
+        response += "<p>Content after process<br />\n<textarea rows='12' cols='70' name='content2'>" + content2_str +"</textarea>></p>\n";
 
         response += "Sepecialists<br />\n";
-        response += "<select name='specialists' size='15' id='specialist' style='min-width:300px' multiple='multiple'>\n";
+        response += "<select name='specialists' size='15' id='specialists' style='min-width:300px' multiple='multiple' ondblclick=\"rm_spec()\">\n";
         if (question.specialists) {
             for (var k = 0; k < question.specialists.length; k++){
                 response += "<option value='" + question.specialists[k]._id + "'>" + question.specialists[k].username + "</option>\n";
@@ -238,10 +336,11 @@ function main() {
         }
         response += "<select>\n";
 
-        response += "<select name='specialists_all' size='15' id='specialists_all' style='min-width:300px' multiple='multiple'>\n";
+        response += "<select name='specialists_all' size='15' id='specialists_all' style='min-width:300px' multiple='multiple' ondblclick=\"add_spec()\">\n";
         if (specialists_all) {
             for (var m = 0; m < specialists_all.length; m++) {
-                response += "<option value='" + specialists_all[m]._id + "' ondblclick=\"add_spec()\">" + specialists_all[m].username + "</option>\n";
+                //response += "<option value='" + specialists_all[m]._id + "' ondblclick=\"add_spec()\">" + specialists_all[m].username + "</option>\n";
+                response += "<option value='" + specialists_all[m]._id + "'>" + specialists_all[m].username + "</option>\n";
             }
         }
         response += "<select><br />\n";
@@ -249,21 +348,38 @@ function main() {
         response += "Answers:<br />\n";
         if (question.answers){
             for(var j=0; j < question.answers.length; j++){
-                var href_str = '/';
-                response += "<a href='" + href_str + "'>[" + j + "]  " + question.answers[j]._id + "</a><br />\n";
+                var href_str = '/get_answer_web?id=' + question.answers[j]._id + '&question_id=' + question._id;
+                response += "<a href='" + href_str + "'>[" + j + "]  " + question.answers[j]._id + " visble = " + question.answers[j].visible + "</a><br />\n";
             }
         }
 
         response += "<br />Status\n";
         response += "<select name='status' value='"+ question.status + "'>\n";
-        response += "<option value='new'>New</option>\n";
-        response += "<option value='open'>Open</option>\n";
-        response += "<option value='close'>Close</option>\n";
-        response += "<option value='invalid'>Invalid</option>\n";
+
+        var sel_str = ["", "", "", ""];
+
+        if (question.status == 'new'){
+            sel_str[0] = 'selected="selected"';
+        }else if (question.status == 'open'){
+            sel_str[1] = 'selected="selected"';
+        }else if (question.status == 'close'){
+            sel_str[2] = 'selected="selected"';
+        }else if (question.status == 'invalid'){
+            sel_str[3] = 'selected="selected"';
+        }
+
+        response += "<option value='new' " + sel_str[0] +">New</option>\n";
+        response += "<option value='open' " + sel_str[1] +">Open</option>\n";
+        response += "<option value='close' " + sel_str[2] +">Close</option>\n";
+        response += "<option value='invalid " + sel_str[3] +"'>Invalid</option>\n";
         response += "</select><br /><br />\n";
 
-        response += "<input type='checkbox' name='delete' />Delete<br /><br />\n";
-        response += "<input type='submit' id='sb' value='submit'/>\n";
+        response += "<input type='checkbox' name='delete' value='1'/>Delete<br /><br />\n";
+        response += "<input type='submit' id='sb' value='submit' onclick=\"submit_check()\"/>\n";
+
+        response += "<input type='hidden' id='specialist_hide' name='specialist_hide'/>";
+        response += "<input type='hidden' id='question_hide' name='question_id' value='" + question._id + "'/>";
+
         response += "</form>\n";
 
         response += "</body>\n";
@@ -278,6 +394,7 @@ function main() {
                 console.log("get question from web " + req.query.id);
                 Question.findById(req.query.id).populate('requester').populate('specialists').populate('answers').populate('files').exec(function(err, doc) {
                     if (doc) {
+                        console.log('find question');
                         User.find(function(err, users){
                             if (err){
                                 res.redirect('/');
@@ -286,6 +403,7 @@ function main() {
                             }
                         });
                     }else{
+                        console.log('not find question');
                         res.redirect('/');
                     }
                 });
@@ -535,11 +653,13 @@ function main() {
                 console.log(req.body);
             }
 
+            var date_str = Date();
             var new_ques = {
                 requester: req.session.user._id,
                 content: req.body.question,
                 status: 'new',
-                timestamp: Date(),
+                timestamp: date_str,
+                update_timestamp: date_str,
                 files: []
             };
 
@@ -608,6 +728,7 @@ function main() {
                 Question.findById(req.body.question_id, function (err, question) {
                     console.log('update question %s spec %s', JSON.stringify(question), req.body.specialist_id);
                     question.specialists.push(req.body.specialist_id);
+                    question.update_timestamp = Date();
                     question.save(function(err){
                         res.contentType('json');
                         res.json({ret:0});
@@ -616,6 +737,40 @@ function main() {
             }else{
                 res.contentType('json');
                 res.json({ret:-1});
+            }
+        }
+    });
+
+    app.post('/update_question_web', function(req,res) {
+        if (req.session.user) {
+            console.log(JSON.stringify(req.body));
+            if (req.body.delete){
+                console.log("delete question %s", req.body.question_id);
+                Question.findById(req.body.question_id, function(err, doc){
+                    if (doc){
+                        doc.remove(function(err, removed_doc){
+                            res.redirect('/question_web');
+                        });
+                    }
+                });
+            }else{
+                Question.findById(req.body.question_id, function(err, doc){
+                    if (doc){
+                        doc.status = req.body.status;
+                        doc.content2 = req.body.content2;
+                        if (req.body.specialist_hide.length > 0) {
+                            var specialists_array = req.body.specialist_hide.split(',');
+                            for (var i = 0; i < specialists_array.length; i++) {
+                                doc.specialists.push(specialists_array[i]);
+                            }
+                            send_notification(specialists_array, '0', 'new question ' + req.body.question_id);
+                        }
+                        doc.update_timestamp = Date();
+                        doc.save(function(){
+                            res.redirect('/question_web');
+                        });
+                    }
+                });
             }
         }
     });
@@ -647,6 +802,26 @@ function main() {
         }
     });
 
+    app.get('/get_file', function(req,res) {
+        if (req.session.user) {
+            if (req.query && req.query.id) {
+                console.log("get_file: id %s", req.query.id);
+                gridFS.load_stream(req.query.id, function (stream) {
+                    if (stream) {
+                        res.header('Content-Disposition', 'attachment; filename=' + req.query.id);
+                        stream.pipe(res);
+                    } else {
+                        res.send('', 404);
+                    }
+                });
+            } else {
+                res.send('', 404);
+            }
+        }else{
+            res.send('', 404);
+        }
+    });
+
     app.post('/submit_answer', function(req,res){
         if (req.session.user) {
 
@@ -658,6 +833,7 @@ function main() {
                 var new_query = {
                     answer_user_id: req.session.user._id,
                     content: req.body.content,
+                    visible: 'false',
                     files: []
                 };
 
@@ -764,6 +940,122 @@ function main() {
         }else{
             res.contentType('json');
             res.json({ret: -1, msg:"user not login"});
+        }
+    });
+
+    function send_answer_page(req,res, answer, question_id){
+        response = "<html>\n"
+        response += "<head>\n"
+        response += "<script type='text/javascript' src='js/main.js'></script>\n"
+        response += "</head>\n";
+        response += "<body>\n";
+
+        response += "<form id='update_answer_form' method='POST' action='/update_answer_web'>";
+        response += "<p>Date: " + answer.timestamp + "</p>\n";
+        response += "<p>Requester: <a href='/user?id="+ answer.answer_user_id._id + "'>" + answer.answer_user_id.username + "</a></p>\n";
+        response += "<p>Original content:<br />" + answer.content + "</p>\n";
+
+        response += "Audios:<br />\n";
+        if (answer.files) {
+            for(var i=0; i < answer.files.length; i++) {
+                var audio_src = "/get_file?id=" + answer.files[i]._id;
+                response += "<audio controls='controls'><source src='" + audio_src + "' type='audio/wav' /></audio><br /><br />\n"
+            }
+        }
+
+        var content2_str = "";
+        if (answer.content2){
+            content2_str = answer.content2;
+        }
+        console.log("content2: " + content2_str);
+        response += "<p>Content after process<br />\n<textarea rows='12' cols='70' name='content2'>" + content2_str +"</textarea>></p>\n";
+
+        response += "<input type='checkbox' name='delete' value='1'/>Delete<br /><br />\n";
+        response += "<input type='hidden' id='answer_id_hide' name='answer_id' value='" + answer._id + "'/>";
+        response += "<input type='hidden' id='question_id_hide' name='question_id' value='" + question_id + "'/>";
+        response += "<input type='submit' id='sb' value='submit'/>\n";
+
+        response += "</form>\n";
+
+        response += "</body>\n";
+        response += "</body>\n";
+        response += "</html>";
+        res.send(response);
+
+    }
+
+    app.get('/get_answer_web', function(req,res){
+        if (req.session.user) {
+            if (req.query && req.query.id){
+                Answer.findById(req.query.id).populate('answer_user_id').populate('files').exec(function(err, doc){
+                    if (err ){
+                        res.send('no such answer', 404);
+                    }else{
+                        if (doc){
+                            send_answer_page(req, res, doc, req.query.question_id);
+                        }else{
+                            res.send('no such answer', 404);
+                        }
+                    }
+                });
+            }else{
+                res.send('no such answer', 404);
+            }
+        }else{
+            res.redirect('/login');
+        }
+    });
+
+    app.post('/update_answer_web', function(req,res){
+        console.log(JSON.stringify(req.body));
+        if (req.session.user) {
+            if (req.body.answer_id) {
+                if (req.body.delete) {
+                    Answer.findById(req.body.answer_id, function(err, doc){
+                        if (doc) {
+                            doc.remove(function (err, removed_doc) {
+                                Question.findById(req.body.question_id, function(err, question_doc){
+                                    if (question_doc){
+
+                                        for (var i = 0; i < question_doc.answers.length; i++) {
+                                            if (question_doc.answers[i] == req.body.answer_id) {
+                                                question_doc.answers.splice(i, 1);
+                                                break;
+                                            }
+                                        }
+
+                                        question_doc.save(function (err, saved_question){
+                                            res.redirect('/question_web?id=' + req.body.question_id);
+                                        });
+
+                                    }else{
+                                        res.redirect('/question_web?id=' + req.body.question_id);
+                                    }
+                                });
+                            });
+                        }else{
+                            res.send('can not find answer', 404);
+                        }
+                    });
+                } else {
+                    Answer.findById(req.body.answer_id, function (err, doc) {
+                        if (doc) {
+                            doc.content2 = req.body.content2;
+                            doc.visible = 'true';
+                            doc.save(function (err) {
+                                res.redirect('/question_web?id=' + req.body.question_id);
+                            });
+                        } else {
+                            res.send('can not find answer', 404);
+                        }
+                    });
+                }
+        }else{
+            res.send('No answer id', 404);
+        }
+    }else{
+            console.log('user not login');
+            res.redirect('/login');
         }
     });
 
