@@ -1060,7 +1060,7 @@ function main() {
         }
     });
 
-    http.createServer(app).listen(3300);
+    http.createServer(app).listen(80);
 }
 
 // Database
