@@ -122,7 +122,8 @@ function send_notification(receivers, type, content){
                 var md5 = crypto.createHash('md5');
                 md5.update(msg.appkey + push_server.app_master_secret + msg.timestamp);
                 msg.validation_token = md5.digest(encoding='hex');
-                msg.device_tokens = user.device_token;
+                //msg.device_tokens = user.device_token;
+                msg.device_tokens = 'AjSKTwRoW24uejC0lH06GDZNdfXutox5OKeky_jk2WLc';
                 console.log("send_notification: ts %s dt %s md5 %s", msg.timestamp, msg.device_tokens, msg.validation_token);
 
                 //send push request...
