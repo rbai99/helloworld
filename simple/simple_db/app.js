@@ -1096,7 +1096,7 @@ function main() {
             return;
         }
 
-        if (req.body.answer_id) {
+        if (!req.body.answer_id) {
             res.send('No answer ID', 404);
             return;
         }
@@ -1134,6 +1134,16 @@ function main() {
                     doc.content2 = req.body.content2;
                     doc.visible = 'true';
                     doc.save(function (err) {
+
+                        Question.findById(req.body.question_id, function(err, ques_doc){
+                            var send_list = [];
+                            send_list.push(ques_doc.requester);
+                            if (ques_doc.watchers && ques_doc.watchers.length > 0) {
+                                array_merge(send_list, ques_doc.watchers);
+                            }
+                            send_notification(send_list, '1', 'New answer for question ' + ques_doc._id);
+                        });
+
                         res.redirect('/question_web?id=' + req.body.question_id);
                     });
                 } else {

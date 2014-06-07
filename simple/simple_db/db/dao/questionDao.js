@@ -23,7 +23,8 @@ var QuestionSchema = new Schema({
     state: {type: String},
     status: {type: String},
     timestamp: {type: String},
-    update_timestamp: {type: String}
+    update_timestamp: {type: String},
+    watchers: {type: Schema.Types.ObjectId, ref: Collection.usersCollection}
 });
 
 var Question = mongoose.model(Collection.questionsCollection, QuestionSchema);
