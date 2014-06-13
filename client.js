@@ -10,10 +10,9 @@ var cur_username;
 var cur_userid;
 
 //var server = '80.240.134.242';
-//var server_port = '80';
-
-var server = 'localhost';
-var server_port = '3300';
+//var server_port = '443';
+//var server = 'localhost';
+//var server_port = '3000';
 
 function getcode(user_name){
 	var user = {
@@ -266,12 +265,13 @@ function download(filename){
 function get_questions(spec_id) {
 
     console.log("specialist %s", spec_id);
+
     var req_json = {
-        requester: cur_userid
+        //requester: cur_userid
+        no_self: 1
+        //specialist: cur_userid
     };
-    if (spec_id) {
-        req_json.specialist = spec_id;
-    }
+    
 
     var req_json_str = JSON.stringify(req_json);
     console.log(req_json_str);
@@ -329,7 +329,7 @@ function submit_question(ques_param, range_param) {
     var question_more = {
         question: ques_param,
         range: range_param, // 0 for background process, 1 for send to everyone, 2 for reserved.
-        files:[{type:'aud', sub_type:'pcm', data:dummy_data},]
+        //files:[{type:'aud', sub_type:'pcm', data:dummy_data},]
     };
     var question_json = JSON.stringify(question_more);
     console.log(question_json);
@@ -378,7 +378,7 @@ function send_answer(question_id_param, content_param){
     var req_json = {
         question_id: question_id_param,
         content: content_param,
-        files:[{type:'aud', sub_type:'pcm', data:dummy_data}]
+        //files:[{type:'aud', sub_type:'pcm', data:dummy_data}]
     };
 
     var req_json_str = JSON.stringify(req_json);
@@ -434,20 +434,23 @@ function list_users() {
 
     var req = http.request(options, function (res) {
         res.setEncoding('utf8');
-
+        var total = "";
         res.on('data', function (data) {
-            var data_json = JSON.parse(data);
+            total += data;
+        });
+        res.on('end', function () {
+            var data_json = JSON.parse(total);
             var ret = data_json.ret;
-            if (data_json.users){
-                for(i=0; i<data_json.users.length; i++){
+            if (data_json.users) {
+                for (i = 0; i < data_json.users.length; i++) {
                     console.log("user %s id %s", data_json.users[i].username, data_json.users[i].userid);
                 }
             }
         });
-    });
 
-    req.on('error', function(e) {
-        console.log('problem with request: ' + e.message);
+        req.on('error', function (e) {
+            console.log('problem with request: ' + e.message);
+        });
     });
 
     req.end();
@@ -623,12 +626,13 @@ function get_answer(question_id_param) {
     req.end();
 }
 
-function add_car(vendor_param, family_param) {
+function add_user_car(vendor_car_id, mileage_p) {
 
     var req_json = {
-        vendor: vendor_param,
-        family: family_param
+        car_id: vendor_car_id
     };
+    if (mileage_p)
+        req_json.mileage = mileage_p;
 
     var req_json_str = JSON.stringify(req_json);
 
@@ -641,7 +645,7 @@ function add_car(vendor_param, family_param) {
     var options = {
         host: server,
         port: server_port,
-        path: '/new_car',
+        path: '/add_user_car',
         method: 'POST',
         headers: headers
     };
@@ -698,7 +702,7 @@ function add_info(info_content) {
             data += chunk;
         });
         res.on('end', function () {
-            console.log('add info got data %s',data);
+            //console.log('add info got data %s',data);
             var data_json = JSON.parse(data);
             console.log("add info return %d", data_json.ret);
             if (data_json.ret == 0){
@@ -768,6 +772,459 @@ function get_info() {
     req.end();
 }
 
+
+function add_vendor(vendor_name, vendor_country, vendor_desc, vendor_begin, vendor_end) {
+
+    console.log("cmd addvendor: vendor_name, vendor_desc, vendor_begin, vendor_end");
+
+    var req_json = {
+        name: vendor_name,
+        country: vendor_country,
+        description: vendor_desc,
+        begin: vendor_begin,
+        end: vendor_end
+    };
+
+    var req_json_str = JSON.stringify(req_json);
+
+    var headers = {
+        'Content-Type': 'application/json',
+        'Content-Length': req_json_str.length,
+        'cookie': session_id
+    };
+
+    var options = {
+        host: server,
+        port: server_port,
+        path: '/submit_vendor',
+        method: 'POST',
+        headers: headers
+    };
+
+    var req = http.request(options, function (res) {
+        res.setEncoding('utf8');
+
+        var data = "";
+        res.on('data', function (chunk) {
+            data += chunk;
+        });
+
+        res.on('end', function () {
+            //console.log('add vendor got data %s',data);
+            var data_json = JSON.parse(data);
+            console.log("add vendor return %d", data_json.ret);
+            if (data_json.ret == 0){
+                console.log('vendor id %s', data_json.id);
+            }else{
+                console.log('err msg %s', data_json.msg);
+            }
+        });
+
+    });
+
+    req.on('error', function(e) {
+        console.log('problem with request: ' + e.message);
+    });
+
+    req.write(req_json_str);
+    req.end();
+}
+
+function get_vendor() {
+
+    console.log("cmd getvendor");
+    var req_json = {
+    };
+
+    var req_json_str = JSON.stringify(req_json);
+
+    var headers = {
+        'Content-Type': 'application/json',
+        'Content-Length': req_json_str.length,
+        'cookie': session_id
+    };
+
+    var options = {
+        host: server,
+        port: server_port,
+        path: '/get_vendor_list',
+        method: 'POST',
+        headers: headers
+    };
+
+    var req = http.request(options, function (res) {
+        res.setEncoding('utf8');
+
+        var data = "";
+        res.on('data', function (chunk) {
+            data += chunk;
+        });
+
+        res.on('end', function () {
+            //console.log('get vendor got data %s',data);
+            var data_json = JSON.parse(data);
+            console.log("get vendor return %d", data_json.ret);
+            if (data_json.ret == 0){
+                for(var i = 0; i < data_json.vendors.length; i++) {
+                    console.log('%d vendor %s', i, JSON.stringify(data_json.vendors[i]));
+                }
+            }else{
+                console.log('err msg %s', data_json.msg);
+            }
+        });
+
+    });
+
+    req.on('error', function(e) {
+        console.log('problem with request: ' + e.message);
+    });
+
+    req.write(req_json_str);
+    req.end();
+}
+
+function add_car_family(vendor_id_p, family_name, family_desc, family_begin, family_end) {
+
+    console.log("cmd addfamily: (vendor_id, family_name, family_desc, family_begin, family_end)");
+
+    var req_json = {
+        vendor_id: vendor_id_p,
+        name: family_name,
+        description: family_desc,
+        begin: family_begin,
+        end: family_end
+    };
+
+    var req_json_str = JSON.stringify(req_json);
+
+    var headers = {
+        'Content-Type': 'application/json',
+        'Content-Length': req_json_str.length,
+        'cookie': session_id
+    };
+
+    var options = {
+        host: server,
+        port: server_port,
+        path: '/submit_car_family',
+        method: 'POST',
+        headers: headers
+    };
+
+    var req = http.request(options, function (res) {
+        res.setEncoding('utf8');
+
+        var data = "";
+        res.on('data', function (chunk) {
+            data += chunk;
+        });
+
+        res.on('end', function () {
+            //console.log('add family got data %s',data);
+            var data_json = JSON.parse(data);
+            console.log("add family return %d", data_json.ret);
+            if (data_json.ret == 0){
+                console.log('family id %s', data_json.id);
+            }else{
+                console.log('err msg %s', data_json.msg);
+            }
+        });
+
+    });
+
+    req.on('error', function(e) {
+        console.log('problem with request: ' + e.message);
+    });
+
+    req.write(req_json_str);
+    req.end();
+}
+
+function get_car_family(vendor_id_p) {
+
+    console.log("cmd getfamily: vendor_id");
+    var req_json = {};
+    if (vendor_id_p)
+        req_json.vendor_id = vendor_id_p;
+
+    var req_json_str = JSON.stringify(req_json);
+
+    var headers = {
+        'Content-Type': 'application/json',
+        'Content-Length': req_json_str.length,
+        'cookie': session_id
+    };
+
+    var options = {
+        host: server,
+        port: server_port,
+        path: '/get_car_family_list',
+        method: 'POST',
+        headers: headers
+    };
+
+    var req = http.request(options, function (res) {
+        res.setEncoding('utf8');
+
+        var data = "";
+        res.on('data', function (chunk) {
+            data += chunk;
+        });
+
+        res.on('end', function () {
+            //console.log('get car family got data %s',data);
+            var data_json = JSON.parse(data);
+            console.log("get car family return %d", data_json.ret);
+            if (data_json.ret == 0){
+                for(var i = 0; i < data_json.families.length; i++) {
+                    console.log('%d vendor %s', i, JSON.stringify(data_json.families[i]));
+                }
+            }else{
+                console.log('err msg %s', data_json.msg);
+            }
+        });
+
+    });
+
+    req.on('error', function(e) {
+        console.log('problem with request: ' + e.message);
+    });
+
+    req.write(req_json_str);
+    req.end();
+}
+
+
+function add_car_generation(family_id_p, gen_name, gen_desc, gen_begin, gen_end) {
+
+    console.log("cmd add_car_generation: (family_id_p, gen_name, gen_desc, gen_begin, gen_end)");
+
+    var req_json = {
+        family_id: family_id_p,
+        name: gen_name,
+        description: gen_desc,
+        begin: gen_begin,
+        end: gen_end
+    };
+
+    var req_json_str = JSON.stringify(req_json);
+
+    var headers = {
+        'Content-Type': 'application/json',
+        'Content-Length': req_json_str.length,
+        'cookie': session_id
+    };
+
+    var options = {
+        host: server,
+        port: server_port,
+        path: '/submit_car_generation',
+        method: 'POST',
+        headers: headers
+    };
+
+    var req = http.request(options, function (res) {
+        res.setEncoding('utf8');
+
+        var data = "";
+        res.on('data', function (chunk) {
+            data += chunk;
+        });
+
+        res.on('end', function () {
+            console.log('add car generation got data %s',data);
+            var data_json = JSON.parse(data);
+            console.log("add car generation return %d", data_json.ret);
+            if (data_json.ret == 0){
+                console.log('generation id %s', data_json.id);
+            }else{
+                console.log('err msg %s', data_json.msg);
+            }
+        });
+
+    });
+
+    req.on('error', function(e) {
+        console.log('problem with request: ' + e.message);
+    });
+
+    req.write(req_json_str);
+    req.end();
+}
+
+function get_car_generation(vendor_id_p, family_id_p) {
+
+    console.log("cmd get_generation: vendor_id family_id");
+    var req_json = {};
+    if (vendor_id_p)
+        req_json.vendor_id = vendor_id_p;
+    if (family_id_p)
+        req_json.family_id = family_id_p;
+
+
+    var req_json_str = JSON.stringify(req_json);
+
+    var headers = {
+        'Content-Type': 'application/json',
+        'Content-Length': req_json_str.length,
+        'cookie': session_id
+    };
+
+    var options = {
+        host: server,
+        port: server_port,
+        path: '/get_car_generation_list',
+        method: 'POST',
+        headers: headers
+    };
+
+    var req = http.request(options, function (res) {
+        res.setEncoding('utf8');
+
+        var data = "";
+        res.on('data', function (chunk) {
+            data += chunk;
+        });
+
+        res.on('end', function () {
+            console.log('get car generation got data %s',data);
+            var data_json = JSON.parse(data);
+            console.log("get car generation return %d", data_json.ret);
+            if (data_json.ret == 0){
+                for(var i = 0; i < data_json.generations.length; i++) {
+                    console.log('%d generation %s', i, JSON.stringify(data_json.generations[i]));
+                }
+            }else{
+                console.log('err msg %s', data_json.msg);
+            }
+        });
+
+    });
+
+    req.on('error', function(e) {
+        console.log('problem with request: ' + e.message);
+    });
+
+    req.write(req_json_str);
+    req.end();
+}
+
+function add_car(generation_id_p, car_name, car_desc, car_begin, car_end) {
+
+    console.log("cmd addcar: (generation_id, name, desc, begin, end)");
+
+    var req_json = {
+        generation_id: generation_id_p,
+        name: car_name,
+        description: car_desc,
+        begin: car_begin,
+        end: car_end
+    };
+
+    var req_json_str = JSON.stringify(req_json);
+
+    var headers = {
+        'Content-Type': 'application/json',
+        'Content-Length': req_json_str.length,
+        'cookie': session_id
+    };
+
+    var options = {
+        host: server,
+        port: server_port,
+        path: '/submit_car',
+        method: 'POST',
+        headers: headers
+    };
+
+    var req = http.request(options, function (res) {
+        res.setEncoding('utf8');
+
+        var data = "";
+        res.on('data', function (chunk) {
+            data += chunk;
+        });
+
+        res.on('end', function () {
+            console.log('add car got data %s',data);
+            var data_json = JSON.parse(data);
+            console.log("add car return %d", data_json.ret);
+            if (data_json.ret == 0){
+                console.log('car id %s', data_json.id);
+            }else{
+                console.log('err msg %s', data_json.msg);
+            }
+        });
+
+    });
+
+    req.on('error', function(e) {
+        console.log('problem with request: ' + e.message);
+    });
+
+    req.write(req_json_str);
+    req.end();
+}
+
+function get_car(vendor_id_p, family_id_p, generation_id_p, car_id_p) {
+
+    console.log("cmd getcar: vendor_id, family_id, generation_id, car_id");
+    var req_json = {};
+    if (vendor_id_p)
+        req_json.vendor_id = vendor_id_p;
+    if (family_id_p)
+        req_json.family_id = family_id_p;
+    if (car_id_p)
+        req_json.car_id = car_id_p;
+
+    var req_json_str = JSON.stringify(req_json);
+
+    var headers = {
+        'Content-Type': 'application/json',
+        'Content-Length': req_json_str.length,
+        'cookie': session_id
+    };
+
+    var options = {
+        host: server,
+        port: server_port,
+        path: '/get_car_list',
+        method: 'POST',
+        headers: headers
+    };
+
+    var req = http.request(options, function (res) {
+        res.setEncoding('utf8');
+
+        var data = "";
+        res.on('data', function (chunk) {
+            data += chunk;
+        });
+
+        res.on('end', function () {
+            //console.log('get car got data %s',data);
+            var data_json = JSON.parse(data);
+            console.log("get car return %d", data_json.ret);
+            if (data_json.ret == 0){
+                for(var i = 0; i < data_json.cars.length; i++) {
+                    console.log('%d generation %s', i, JSON.stringify(data_json.cars[i]));
+                }
+            }else{
+                console.log('err msg %s', data_json.msg);
+            }
+        });
+
+    });
+
+    req.on('error', function(e) {
+        console.log('problem with request: ' + e.message);
+    });
+
+    req.write(req_json_str);
+    req.end();
+}
+
+
 var rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout
@@ -805,12 +1262,28 @@ rl.on('line', function (cmd) {
         get_answer(inputs[1], inputs[2]);
     }else if (inputs[0] == 'deluser'){
         delete_user(inputs[1]);
-    }else if (inputs[0] == 'addcar'){
+    }else if (inputs[0] == 'addusercar'){
         add_car(inputs[1], inputs[2]);
     }else if (inputs[0] == 'addinfo'){
         add_info(inputs[1]);
     }else if (inputs[0] == 'getinfo'){
         get_info();
+    }else if (inputs[0] == 'addvendor'){
+        add_vendor(inputs[1], inputs[2], inputs[3], inputs[4]);
+    }else if (inputs[0] == 'getvendor'){
+        get_vendor();
+    }else if (inputs[0] == 'addfamily'){
+        add_car_family(inputs[1], inputs[2], inputs[3], inputs[4], inputs[5]);
+    }else if (inputs[0] == 'getfamily'){
+        get_car_family(inputs[1]);
+    }else if (inputs[0] == 'addgen'){
+        add_car_generation(inputs[1], inputs[2], inputs[3], inputs[4], inputs[5]);
+    }else if (inputs[0] == 'getgen'){
+        get_car_generation(inputs[1], inputs[2]);
+    }else if (inputs[0] == 'addcar'){
+        add_car(inputs[1], inputs[2], inputs[3], inputs[4], inputs[5], inputs[6]);
+    }else if (inputs[0] == 'getcar'){
+        get_car(inputs[1], inputs[2], inputs[3]);
     }
 
 });
